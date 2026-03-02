@@ -13,6 +13,17 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 )
 
+// NewAnalyzer creates a standalone analysis.Analyzer for use as a built-in golangci-lint linter.
+func NewAnalyzer(s *Settings) *analysis.Analyzer {
+	if s == nil {
+		s = &Settings{}
+	}
+	s.prepare()
+	table := buildGVKTable(s.ExtraKnownGVKs)
+	p := &plugin{settings: *s, gvkTable: table}
+	return newAnalyzer(p)
+}
+
 func newAnalyzer(p *plugin) *analysis.Analyzer {
 	return &analysis.Analyzer{
 		Name:     "kubetyped",
