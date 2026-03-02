@@ -41,7 +41,7 @@ lint:
   - name: trivy
     commands:
     - name: fs-vuln
-      enabled: false # disabled: trivy v0.69.2 segfaults on go.mod (bbolt db corruption)
+      enabled: true
     - name: fs-secret
       enabled: true
     - name: config
