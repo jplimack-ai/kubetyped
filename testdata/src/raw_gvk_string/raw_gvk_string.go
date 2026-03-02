@@ -143,6 +143,14 @@ var embeddedTypeMeta = MyResource{
 	},
 }
 
+// --- Positional TypeMeta: NOT flagged (known limitation — positional fields not parsed) ---
+
+var positionalTypeMeta = metav1.TypeMeta{"Deployment", "apps/v1"}
+
+// --- Positional GVK: NOT flagged (known limitation — positional fields not parsed) ---
+
+var positionalGVK = schema.GroupVersionKind{"apps", "v1", "Deployment"}
+
 // --- Empty TypeMeta: NOT flagged ---
 
 var emptyTypeMeta = metav1.TypeMeta{}

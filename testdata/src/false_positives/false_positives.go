@@ -44,6 +44,25 @@ var intMap = map[string]int{
 // Empty map literal: NOT flagged.
 var emptyMap = map[string]any{}
 
+// Int const as map value: NOT flagged (const is not a string).
+const deployPort = 8080
+
+var intConstValue = map[string]any{
+	"apiVersion": deployPort,
+	"kind":       "Pod",
+}
+
+// Variable map key: NOT flagged (key can't be resolved at compile time).
+var keyName = "apiVersion"
+
+var varKeyMap = map[string]any{
+	keyName: "v1",
+	"kind":  "Pod",
+}
+
+// fmt.Errorf with YAML marker: NOT flagged (only Sprintf/Fprintf checked).
+var _ = fmt.Errorf("apiVersion: v1\nkind: Pod\n")
+
 // Two-step map construction: NOT flagged (known limitation).
 var twoStep = make(map[string]any)
 

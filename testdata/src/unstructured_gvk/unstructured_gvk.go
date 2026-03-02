@@ -94,3 +94,39 @@ func setPairDynamic(apiVersion string) {
 	u.SetAPIVersion(apiVersion)
 	u.SetKind("Widget")
 }
+
+// Method chain receiver: pair NOT tracked (receiver is not a simple ident).
+func getU() *unstructured.Unstructured { return &unstructured.Unstructured{} }
+
+func chainedRecv() {
+	getU().SetAPIVersion("apps/v1")
+	getU().SetKind("Deployment")
+}
+
+// Interface-typed receiver: NOT flagged (isUnstructuredType checks concrete type).
+type gvkSetter interface {
+	SetGroupVersionKind(schema.GroupVersionKind)
+}
+
+func interfaceRecv(u gvkSetter) {
+	u.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "Deployment", // want `raw string "Deployment" for GroupVersionKind\.Kind; use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) or define a const`
+	})
+}
+
+// Positional GVK in SetGroupVersionKind: NOT flagged (positional fields not parsed).
+func positionalGVK() {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{"apps", "v1", "Deployment"})
+}
+
+// SetGroupVersionKind with missing Kind: NOT flagged (incomplete GVK).
+func incompleteGVK() {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apps",
+		Version: "v1",
+	})
+}
