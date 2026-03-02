@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/jplimack-ai/kubetyped/compare/v1.1.0...v1.2.0) (2026-03-02)
+
+
+### Features
+
+* export NewAnalyzer for built-in golangci-lint integration ([#5](https://github.com/jplimack-ai/kubetyped/issues/5)) ([0212e34](https://github.com/jplimack-ai/kubetyped/commit/0212e342e9269b1a0052113304213c6849e361d5))
+
 ## [1.1.0](https://github.com/jplimack-ai/kubetyped/compare/v1.0.0...v1.1.0) (2026-03-02)
 
 
