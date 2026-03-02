@@ -60,6 +60,7 @@ func findNextDeclPos(f *ast.File, after token.Pos) token.Pos {
 }
 
 // checkReadFileYAML detects os.ReadFile or os.Open calls with a YAML file path argument.
+// Both literal and const string arguments are resolved.
 func checkReadFileYAML(pass *analysis.Pass, call *ast.CallExpr) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
@@ -80,7 +81,7 @@ func checkReadFileYAML(pass *analysis.Pass, call *ast.CallExpr) {
 		return
 	}
 
-	path, ok := extractStringValue(call.Args[0])
+	path, ok := extractStringOrConstValue(pass, call.Args[0])
 	if !ok {
 		return
 	}

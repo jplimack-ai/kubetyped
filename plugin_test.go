@@ -21,6 +21,7 @@ func testAnalyzer(t *testing.T, s Settings) *plugin {
 	if err := s.validateGVKKeys(); err != nil {
 		t.Fatalf("invalid settings: %v", err)
 	}
+	s.prepare()
 
 	return &plugin{settings: s, gvkTable: buildGVKTable(s.ExtraKnownGVKs)}
 }
@@ -170,6 +171,12 @@ func TestParseGVKEntry(t *testing.T) {
 			wantShort:  "something",
 			wantImport: "something",
 		},
+		{
+			name:       "domain-heavy CRD path",
+			entry:      GVKEntry{TypedPackage: "sigs.k8s.io/controller-runtime/pkg/client.Client"},
+			wantShort:  "client.Client",
+			wantImport: "sigs.k8s.io/controller-runtime/pkg/client",
+		},
 	}
 
 	for _, tt := range tests {
@@ -228,6 +235,7 @@ func TestIsGVKIgnored(t *testing.T) {
 	s := Settings{
 		IgnoreGVKs: []string{"apps/v1/Deployment", "v1/Pod"},
 	}
+	s.prepare()
 
 	if !s.isGVKIgnored("apps/v1", "Deployment") {
 		t.Fatal("expected apps/v1 Deployment to be ignored")
@@ -373,16 +381,84 @@ func TestAllChecksDisabled(t *testing.T) {
 	p := testAnalyzer(t, Settings{
 		IncludeTestFiles: true,
 		Checks: map[string]CheckConfig{
-			checkMapLiteral:      {Enabled: &disabled},
-			checkSprintfYAML:     {Enabled: &disabled},
-			checkUnstructuredGVK: {Enabled: &disabled},
-			checkRawGVKString:    {Enabled: &disabled},
-			checkDeprecatedAPI:   {Enabled: &disabled},
-			checkEmbeddedYAML:    {Enabled: &disabled},
+			checkMapLiteral:          {Enabled: &disabled},
+			checkSprintfYAML:         {Enabled: &disabled},
+			checkUnstructuredGVK:     {Enabled: &disabled},
+			checkRawGVKString:        {Enabled: &disabled},
+			checkDeprecatedAPI:       {Enabled: &disabled},
+			checkEmbeddedYAML:        {Enabled: &disabled},
+			checkRawConditionStatus:  {Enabled: &disabled},
+			checkConditionMapLiteral: {Enabled: &disabled},
+			checkUnstructuredStatus:  {Enabled: &disabled},
+			checkRawConditionType:    {Enabled: &disabled},
 		},
 	})
-	// All checks disabled — disabled_check triggers all 6, expects zero diagnostics.
+	// All checks disabled — disabled_check triggers all 10, expects zero diagnostics.
 	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "disabled_check")
+}
+
+func TestRawConditionStatus(t *testing.T) {
+	p := testAnalyzer(t, Settings{IncludeTestFiles: true})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "raw_condition_status")
+}
+
+func TestCheckDisabled_RawConditionStatus(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkRawConditionStatus: {Enabled: &disabled},
+		},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "only_raw_condition_status")
+}
+
+func TestRawConditionType(t *testing.T) {
+	p := testAnalyzer(t, Settings{IncludeTestFiles: true})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "raw_condition_type")
+}
+
+func TestCheckDisabled_RawConditionType(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkRawConditionType: {Enabled: &disabled},
+		},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "only_raw_condition_type")
+}
+
+func TestConditionMapLiteral(t *testing.T) {
+	p := testAnalyzer(t, Settings{IncludeTestFiles: true})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "condition_map")
+}
+
+func TestCheckDisabled_ConditionMapLiteral(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkConditionMapLiteral: {Enabled: &disabled},
+		},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "only_condition_map")
+}
+
+func TestUnstructuredStatus(t *testing.T) {
+	p := testAnalyzer(t, Settings{IncludeTestFiles: true})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "unstructured_status")
+}
+
+func TestCheckDisabled_UnstructuredStatus(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkUnstructuredStatus: {Enabled: &disabled},
+		},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "only_unstructured_status")
 }
 
 func TestCheckDisabled_UnstructuredGVK(t *testing.T) {
@@ -691,6 +767,17 @@ func TestEmbeddedYAML(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "embedded_yaml")
 }
 
+func TestMapLiteralDisabled_DeprecatedAPIEnabled(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkMapLiteral: {Enabled: &disabled},
+		},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "deprecated_only_map")
+}
+
 func TestCheckDisabled_EmbeddedYAML(t *testing.T) {
 	disabled := false
 	p := testAnalyzer(t, Settings{
@@ -707,6 +794,7 @@ func TestIsGVKRejected(t *testing.T) {
 	s := Settings{
 		RejectGVKs: []string{"apps/v1/Deployment", "v1/Pod"},
 	}
+	s.prepare()
 
 	if !s.isGVKRejected("apps/v1", "Deployment") {
 		t.Fatal("expected apps/v1 Deployment to be rejected")
@@ -769,6 +857,26 @@ func TestValidateGVKKeys(t *testing.T) {
 			s:       Settings{IgnoreGVKs: []string{""}},
 			wantErr: true,
 		},
+		{
+			name:    "ignore_gvks bare slash",
+			s:       Settings{IgnoreGVKs: []string{"/"}},
+			wantErr: true,
+		},
+		{
+			name:    "ignore_gvks trailing slash",
+			s:       Settings{IgnoreGVKs: []string{"apps/v1/"}},
+			wantErr: true,
+		},
+		{
+			name:    "reject_gvks bare slash",
+			s:       Settings{RejectGVKs: []string{"/"}},
+			wantErr: true,
+		},
+		{
+			name:    "reject_gvks trailing slash",
+			s:       Settings{RejectGVKs: []string{"apps/v1/"}},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -818,5 +926,21 @@ func TestLookupDeprecatedGVK(t *testing.T) {
 		if ok && info.RemovedIn != tt.wantRemIn {
 			t.Errorf("lookupDeprecatedGVK(%q, %q) RemovedIn = %q, want %q", tt.apiVersion, tt.kind, info.RemovedIn, tt.wantRemIn)
 		}
+	}
+}
+
+func TestFindNextDeclPos_Fallback(t *testing.T) {
+	f := &ast.File{
+		Decls: []ast.Decl{
+			&ast.GenDecl{TokPos: 10},
+		},
+	}
+	// after=100 is beyond all declarations, so fallback returns after.
+	if got := findNextDeclPos(f, 100); got != 100 {
+		t.Errorf("findNextDeclPos(f, 100) = %v, want 100", got)
+	}
+	// after=5 is before the declaration, so returns the decl's position.
+	if got := findNextDeclPos(f, 5); got != 10 {
+		t.Errorf("findNextDeclPos(f, 5) = %v, want 10", got)
 	}
 }

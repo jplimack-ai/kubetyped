@@ -26,7 +26,6 @@ func newAnalyzer(p *plugin) *analysis.Analyzer {
 
 func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (any, error) {
 	enabled := settings.enabledChecks()
-	markers := settings.markersForSprintfYAML()
 	insp, _ := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	// Scan for //go:embed YAML directives before the AST walk.
@@ -34,19 +33,21 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 		checkEmbeddedYAMLFiles(pass, settings)
 	}
 
-	// Track SetAPIVersion/SetKind pairs per receiver for the unstructured check.
-	pairTracker := make(map[token.Pos]*gvkParts)
-
-	// Track composite literal positions already policy-checked by checkUnstructuredGVKExpr
-	// to avoid duplicate deprecated_api/reject diagnostics from checkRawGVKStringCompositeLit.
-	// The value stores the gvkAction returned by evalGVKPolicy so the raw_gvk_string checker
-	// can also skip its own diagnostic when the policy said gvkStop.
-	policyChecked := make(map[token.Pos]gvkAction)
+	d := &dispatcher{
+		pass:          pass,
+		settings:      settings,
+		gvkTable:      gvkTable,
+		enabled:       enabled,
+		markers:       settings.markersForSprintfYAML(),
+		pairTracker:   make(map[token.Pos]*gvkParts),
+		policyChecked: make(map[token.Pos]gvkAction),
+	}
 
 	nodeFilter := []ast.Node{
 		(*ast.CompositeLit)(nil),
 		(*ast.CallExpr)(nil),
 		(*ast.BinaryExpr)(nil),
+		(*ast.IndexExpr)(nil),
 	}
 
 	insp.Preorder(nodeFilter, func(n ast.Node) {
@@ -56,39 +57,85 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 				return
 			}
 		}
-
-		switch node := n.(type) {
-		case *ast.CompositeLit:
-			if enabled[checkMapLiteral] || enabled[checkDeprecatedAPI] {
-				checkMapLiteralExpr(pass, node, gvkTable, settings, enabled)
-			}
-			if enabled[checkRawGVKString] || enabled[checkDeprecatedAPI] {
-				checkRawGVKStringCompositeLit(pass, node, gvkTable, settings, enabled, policyChecked)
-			}
-		case *ast.CallExpr:
-			if enabled[checkSprintfYAML] {
-				checkSprintfYAMLExpr(pass, node, markers)
-			}
-			if enabled[checkUnstructuredGVK] || enabled[checkDeprecatedAPI] {
-				checkUnstructuredGVKExpr(pass, node, gvkTable, settings, enabled, policyChecked)
-				trackSetAPIVersionKind(pass, node, pairTracker)
-			}
-			if enabled[checkEmbeddedYAML] {
-				checkReadFileYAML(pass, node)
-			}
-		case *ast.BinaryExpr:
-			if enabled[checkRawGVKString] {
-				checkRawGVKStringBinaryExpr(pass, node)
-			}
-		}
+		d.dispatch(n)
 	})
 
 	// Report SetAPIVersion/SetKind pairs with known GVKs.
 	if enabled[checkUnstructuredGVK] || enabled[checkDeprecatedAPI] {
-		reportSetPairs(pass, pairTracker, gvkTable, settings, enabled)
+		reportSetPairs(pass, d.pairTracker, gvkTable, settings, enabled)
 	}
 
 	return nil, nil
+}
+
+// dispatcher holds per-run state and routes AST nodes to the appropriate check functions.
+type dispatcher struct {
+	pass          *analysis.Pass
+	settings      *Settings
+	gvkTable      map[string]gvkInfo
+	enabled       map[string]bool
+	markers       []string
+	pairTracker   map[token.Pos]*gvkParts
+	policyChecked map[token.Pos]gvkAction
+}
+
+func (d *dispatcher) dispatch(n ast.Node) {
+	switch node := n.(type) {
+	case *ast.CompositeLit:
+		d.dispatchCompositeLit(node)
+	case *ast.CallExpr:
+		d.dispatchCallExpr(node)
+	case *ast.BinaryExpr:
+		d.dispatchBinaryExpr(node)
+	case *ast.IndexExpr:
+		d.dispatchIndexExpr(node)
+	}
+}
+
+func (d *dispatcher) dispatchCompositeLit(node *ast.CompositeLit) {
+	if d.enabled[checkMapLiteral] || d.enabled[checkDeprecatedAPI] {
+		checkMapLiteralExpr(d.pass, node, d.gvkTable, d.settings, d.enabled)
+	}
+	if d.enabled[checkRawGVKString] || d.enabled[checkDeprecatedAPI] {
+		checkRawGVKStringCompositeLit(d.pass, node, d.gvkTable, d.settings, d.enabled, d.policyChecked)
+	}
+	if d.enabled[checkRawConditionStatus] || d.enabled[checkRawConditionType] {
+		checkConditionCompositeLit(d.pass, node, d.enabled)
+	}
+	if d.enabled[checkConditionMapLiteral] {
+		checkConditionMapLiteralExpr(d.pass, node)
+	}
+}
+
+func (d *dispatcher) dispatchCallExpr(node *ast.CallExpr) {
+	if d.enabled[checkSprintfYAML] {
+		checkSprintfYAMLExpr(d.pass, node, d.markers)
+	}
+	if d.enabled[checkUnstructuredGVK] || d.enabled[checkDeprecatedAPI] {
+		checkUnstructuredGVKExpr(d.pass, node, d.gvkTable, d.settings, d.enabled, d.policyChecked)
+		trackSetAPIVersionKind(d.pass, node, d.pairTracker)
+	}
+	if d.enabled[checkEmbeddedYAML] {
+		checkReadFileYAML(d.pass, node)
+	}
+	if d.enabled[checkUnstructuredStatus] {
+		checkUnstructuredStatusCall(d.pass, node)
+	}
+}
+
+func (d *dispatcher) dispatchBinaryExpr(node *ast.BinaryExpr) {
+	if d.enabled[checkRawGVKString] {
+		checkRawGVKStringBinaryExpr(d.pass, node)
+	}
+	if d.enabled[checkRawConditionStatus] {
+		checkConditionStatusBinaryExpr(d.pass, node)
+	}
+}
+
+func (d *dispatcher) dispatchIndexExpr(node *ast.IndexExpr) {
+	if d.enabled[checkUnstructuredStatus] {
+		checkUnstructuredStatusIndex(d.pass, node)
+	}
 }
 
 // extractStringValue extracts a plain string value from a *ast.BasicLit of kind STRING.

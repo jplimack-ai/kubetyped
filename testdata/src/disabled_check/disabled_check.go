@@ -53,3 +53,24 @@ var deprecated = map[string]any{
 func readYAML() {
 	_, _ = os.ReadFile("deployment.yaml")
 }
+
+// raw_condition_status trigger: raw string in Condition.Status.
+var cond = metav1.Condition{
+	Type:   "Ready",
+	Status: "True",
+}
+
+// condition_map_literal trigger: map[string]any with "type" + "status".
+var condMap = map[string]any{
+	"type":   "Ready",
+	"status": "True",
+}
+
+// unstructured_status trigger: SetNestedField targeting "status".
+func setStatus() {
+	obj := map[string]any{}
+	unstructured.SetNestedField(obj, "Running", "status", "phase")
+}
+
+// raw_condition_type trigger: raw string in Condition.Type.
+// (cond above also triggers this — both raw_condition_status and raw_condition_type fire on it.)

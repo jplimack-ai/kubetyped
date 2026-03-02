@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
+	"slices"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -183,7 +185,9 @@ func trackSetAPIVersionKind(pass *analysis.Pass, call *ast.CallExpr, tracker map
 
 // reportSetPairs reports diagnostics for receivers that had both SetAPIVersion and SetKind called.
 func reportSetPairs(pass *analysis.Pass, tracker map[token.Pos]*gvkParts, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool) {
-	for _, parts := range tracker {
+	keys := slices.Sorted(maps.Keys(tracker))
+	for _, key := range keys {
+		parts := tracker[key]
 		if parts.apiVersion == "" || parts.kind == "" {
 			continue
 		}

@@ -32,3 +32,10 @@ func dynamicPath(path string) {
 func createYAML() {
 	_, _ = os.Create("foo.yaml") // no diagnostic — os.Create is not reading a manifest
 }
+
+// Const path: now resolved via extractStringOrConstValue.
+const yamlPath = "const-manifest.yaml"
+
+func constPathRead() {
+	_, _ = os.ReadFile(yamlPath) // want `os\.ReadFile of YAML file "const-manifest\.yaml"; consider using typed Kubernetes structs from k8s\.io/api`
+}

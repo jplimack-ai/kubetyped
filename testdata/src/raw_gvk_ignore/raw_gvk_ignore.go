@@ -29,3 +29,15 @@ var nonIgnoredGVK = schema.GroupVersionKind{
 	Version: "v1",
 	Kind:    "Pod", // want `raw string "Pod" for GroupVersionKind\.Kind; use \*corev1\.Pod \(import "k8s\.io/api/core/v1"\) or define a const`
 }
+
+// --- Binary expression comparison: IgnoreGVKs does NOT suppress this ---
+// Known limitation: binary expr check only has Kind or APIVersion in isolation,
+// so evalGVKPolicy cannot be called.
+
+type kubeObj interface {
+	GetKind() string
+}
+
+func checkIgnoredKind(obj kubeObj) bool {
+	return obj.GetKind() == "Deployment" // want `raw string "Deployment" in GVK comparison; define a package-level const`
+}

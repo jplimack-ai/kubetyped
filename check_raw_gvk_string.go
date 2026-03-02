@@ -90,13 +90,7 @@ func checkTypeMetaRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, setting
 	}
 
 	if apiVersion != "" && kind != "" {
-		if action, checked := policyChecked[lit.Pos()]; checked {
-			// checkUnstructuredGVKExpr already ran the policy for this literal.
-			// If it returned gvkStop (reject or ignore), suppress raw diagnostics too.
-			if action == gvkStop {
-				return
-			}
-		} else if evalGVKPolicy(pass, lit.Pos(), apiVersion, kind, checkRawGVKString, settings, enabled) == gvkStop {
+		if runPolicy(policyChecked, lit.Pos(), pass, apiVersion, kind, checkRawGVKString, settings, enabled) == gvkStop {
 			return
 		}
 	}
@@ -119,6 +113,9 @@ func checkTypeMetaRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, setting
 }
 
 // checkGVKRawStrings flags raw string literals in GroupVersionKind.Kind and looks up the GVK table for suggestions.
+// NOTE: The Group/Version/Kind field extraction here intentionally duplicates
+// extractGVKFromCompositeLit (check_unstructured.go) because this function
+// also needs to track kindIsRaw/kindValue for the raw string diagnostic.
 func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool, policyChecked map[token.Pos]gvkAction) {
 	var group, version, kind string
 	var kindValue ast.Expr
@@ -157,11 +154,7 @@ func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map
 	}
 
 	if apiVersion != "" && kind != "" {
-		if action, checked := policyChecked[lit.Pos()]; checked {
-			if action == gvkStop {
-				return
-			}
-		} else if evalGVKPolicy(pass, lit.Pos(), apiVersion, kind, checkRawGVKString, settings, enabled) == gvkStop {
+		if runPolicy(policyChecked, lit.Pos(), pass, apiVersion, kind, checkRawGVKString, settings, enabled) == gvkStop {
 			return
 		}
 	}
@@ -191,6 +184,15 @@ func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map
 			),
 		})
 	}
+}
+
+// runPolicy checks the policyChecked map first, falling back to evalGVKPolicy.
+// This deduplicates the if-checked/else-eval branching in checkTypeMetaRawStrings and checkGVKRawStrings.
+func runPolicy(policyChecked map[token.Pos]gvkAction, pos token.Pos, pass *analysis.Pass, apiVersion, kind, category string, settings *Settings, enabled map[string]bool) gvkAction {
+	if action, checked := policyChecked[pos]; checked {
+		return action
+	}
+	return evalGVKPolicy(pass, pos, apiVersion, kind, category, settings, enabled)
 }
 
 // checkRawGVKStringBinaryExpr flags raw string comparisons against GVK accessors.

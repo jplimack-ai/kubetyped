@@ -32,6 +32,8 @@ func New(settings any) (register.LinterPlugin, error) {
 		return nil, err
 	}
 
+	s.prepare()
+
 	table := buildGVKTable(s.ExtraKnownGVKs)
 	return &plugin{settings: s, gvkTable: table}, nil
 }

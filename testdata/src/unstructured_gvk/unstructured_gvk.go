@@ -130,3 +130,11 @@ func incompleteGVK() {
 		Version: "v1",
 	})
 }
+
+// Double SetAPIVersion: last write wins, diagnostic uses final value.
+func doubleSet() {
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion("v1")
+	u.SetAPIVersion("apps/v1") // want `SetAPIVersion\("apps/v1"\) \+ SetKind\("Deployment"\) on unstructured\.Unstructured: use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) instead`
+	u.SetKind("Deployment")
+}

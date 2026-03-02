@@ -24,6 +24,10 @@ type Settings struct {
 	// Checks configures which checks are enabled and their per-check settings.
 	// nil or empty map means all checks enabled with defaults.
 	Checks map[string]CheckConfig `json:"checks"`
+
+	// Precomputed lookup sets built by prepare().
+	ignoredSet  map[string]struct{}
+	rejectedSet map[string]struct{}
 }
 
 // CheckConfig holds per-check configuration.
@@ -43,15 +47,22 @@ type GVKEntry struct {
 }
 
 const (
-	checkMapLiteral      = "map_literal"
-	checkSprintfYAML     = "sprintf_yaml"
-	checkUnstructuredGVK = "unstructured_gvk"
-	checkRawGVKString    = "raw_gvk_string"
-	checkDeprecatedAPI   = "deprecated_api"
-	checkEmbeddedYAML    = "embedded_yaml"
+	checkMapLiteral          = "map_literal"
+	checkSprintfYAML         = "sprintf_yaml"
+	checkUnstructuredGVK     = "unstructured_gvk"
+	checkRawGVKString        = "raw_gvk_string"
+	checkDeprecatedAPI       = "deprecated_api"
+	checkEmbeddedYAML        = "embedded_yaml"
+	checkRawConditionStatus  = "raw_condition_status"
+	checkConditionMapLiteral = "condition_map_literal"
+	checkUnstructuredStatus  = "unstructured_status"
+	checkRawConditionType    = "raw_condition_type"
 )
 
-var allChecks = []string{checkMapLiteral, checkSprintfYAML, checkUnstructuredGVK, checkRawGVKString, checkDeprecatedAPI, checkEmbeddedYAML}
+var allChecks = []string{
+	checkMapLiteral, checkSprintfYAML, checkUnstructuredGVK, checkRawGVKString, checkDeprecatedAPI, checkEmbeddedYAML,
+	checkRawConditionStatus, checkConditionMapLiteral, checkUnstructuredStatus, checkRawConditionType,
+}
 
 // enabledChecks returns the set of enabled check names based on settings.
 func (s *Settings) enabledChecks() map[string]bool {
@@ -106,15 +117,15 @@ func (s *Settings) validateExtraGVKs() error {
 }
 
 // validateGVKKeys returns an error if any IgnoreGVKs or RejectGVKs entry
-// is not in "apiVersion/kind" format (must contain exactly one or more '/' separators).
+// is not in "apiVersion/kind" format. The kind portion (after the last '/') must be non-empty.
 func (s *Settings) validateGVKKeys() error {
 	for i, key := range s.IgnoreGVKs {
-		if !strings.Contains(key, "/") {
+		if idx := strings.LastIndex(key, "/"); idx < 0 || key[idx+1:] == "" {
 			return fmt.Errorf("ignore_gvks[%d]: %q must be in \"apiVersion/kind\" format", i, key)
 		}
 	}
 	for i, key := range s.RejectGVKs {
-		if !strings.Contains(key, "/") {
+		if idx := strings.LastIndex(key, "/"); idx < 0 || key[idx+1:] == "" {
 			return fmt.Errorf("reject_gvks[%d]: %q must be in \"apiVersion/kind\" format", i, key)
 		}
 	}
@@ -133,12 +144,33 @@ func (s *Settings) markersForSprintfYAML() []string {
 	return markers
 }
 
+// prepare builds internal lookup maps from the slice fields.
+// Must be called after validation and before the analyzer runs.
+func (s *Settings) prepare() {
+	s.ignoredSet = make(map[string]struct{}, len(s.IgnoreGVKs))
+	for _, k := range s.IgnoreGVKs {
+		s.ignoredSet[k] = struct{}{}
+	}
+	s.rejectedSet = make(map[string]struct{}, len(s.RejectGVKs))
+	for _, k := range s.RejectGVKs {
+		s.rejectedSet[k] = struct{}{}
+	}
+}
+
 // isGVKIgnored returns true if the given apiVersion/kind is in the IgnoreGVKs list.
 func (s *Settings) isGVKIgnored(apiVersion, kind string) bool {
-	return slices.Contains(s.IgnoreGVKs, gvkKey(apiVersion, kind))
+	if s.ignoredSet == nil {
+		return slices.Contains(s.IgnoreGVKs, gvkKey(apiVersion, kind))
+	}
+	_, ok := s.ignoredSet[gvkKey(apiVersion, kind)]
+	return ok
 }
 
 // isGVKRejected returns true if the given apiVersion/kind is in the RejectGVKs list.
 func (s *Settings) isGVKRejected(apiVersion, kind string) bool {
-	return slices.Contains(s.RejectGVKs, gvkKey(apiVersion, kind))
+	if s.rejectedSet == nil {
+		return slices.Contains(s.RejectGVKs, gvkKey(apiVersion, kind))
+	}
+	_, ok := s.rejectedSet[gvkKey(apiVersion, kind)]
+	return ok
 }
