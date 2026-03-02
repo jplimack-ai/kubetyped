@@ -41,6 +41,9 @@ var intMap = map[string]int{
 // Sprintf with "kind:" in non-YAML context: we do flag this (documented as known behavior).
 // If you have a legitimate use of "kind:" in a non-YAML string, use //nolint:kube-types.
 
+// Empty map literal: NOT flagged.
+var emptyMap = map[string]any{}
+
 // Two-step map construction: NOT flagged (known limitation).
 var twoStep = make(map[string]any)
 

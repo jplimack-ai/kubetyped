@@ -26,3 +26,11 @@ var notFlagged = map[string]any{
 	"apiVersion": dynamicVersion,
 	"kind":       "Deployment",
 }
+
+// Const map key: should be flagged after C0 fix resolves const keys.
+const apiVersionKey = "apiVersion"
+
+var constKeyMap = map[string]any{ // want `use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) instead of map\[string\]any for apps/v1/Deployment`
+	apiVersionKey: "apps/v1",
+	"kind":        "Deployment",
+}

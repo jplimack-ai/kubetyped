@@ -1,5 +1,7 @@
 # kube-types
 
+[![CI](https://github.com/togethercomputer/kube-types/actions/workflows/ci.yml/badge.svg)](https://github.com/togethercomputer/kube-types/actions/workflows/ci.yml)
+
 A [golangci-lint](https://golangci-lint.run/) v2 module plugin that detects untyped Kubernetes manifest construction and suggests typed Go structs.
 
 ## Why
@@ -64,6 +66,31 @@ u.SetAPIVersion("apps/v1")
 u.SetKind("Deployment")
 ```
 
+### `raw_gvk_string`
+
+Detects raw string literals (`"Deployment"`, `"apps/v1"`) in three contexts:
+
+1. **TypeMeta field assignments** — `metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"}`
+2. **GroupVersionKind construction** — `schema.GroupVersionKind{..., Kind: "Deployment"}`
+3. **GVK equality comparisons** — `obj.GetKind() == "Deployment"` or `gvk.Kind == "Deployment"`
+
+Since `k8s.io/api` does not publish Kind constants, the check encourages defining package-level constants or using scheme-based approaches (`scheme.ObjectKinds()`, `apiutil.GVKForObject()`).
+
+```go
+// Flagged (each field independently):
+metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"}
+
+// Flagged (raw Kind in GVK literal):
+schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
+
+// Flagged (comparison against raw string):
+if obj.GetKind() == "Deployment" { ... }
+
+// NOT flagged (const values are the desired pattern):
+const kindDeployment = "Deployment"
+metav1.TypeMeta{Kind: kindDeployment, APIVersion: constAPIVersion}
+```
+
 ## Built-in GVKs
 
 The plugin ships with ~35 known GVKs covering the most common Kubernetes resources:
@@ -119,6 +146,7 @@ linters-settings:
         include_test_files: false
 
         # Per-check configuration. Omit for all checks enabled with defaults.
+        # Valid checks: "map_literal", "sprintf_yaml", "unstructured_gvk", "raw_gvk_string"
         checks:
           map_literal:
             enabled: true
@@ -127,6 +155,8 @@ linters-settings:
             additional_markers:
               - "metadata:"
           unstructured_gvk:
+            enabled: true
+          raw_gvk_string:
             enabled: true
 
         # Register additional GVKs beyond the built-in table.
@@ -158,6 +188,15 @@ linters:
 | `extra_known_gvks[].typed_package` | `string` | required | Full typed package path (e.g. `"k8s.io/api/apps/v1.Deployment"`) |
 | `ignore_gvks` | `[]string` | `[]` | GVK keys to suppress (`"apiVersion/kind"` format) |
 
+### IgnoreGVKs Behavior
+
+`ignore_gvks` suppresses diagnostics for the following checks:
+
+- **`map_literal`** — suppressed when both `apiVersion` and `kind` match
+- **`unstructured_gvk`** — suppressed for `SetGroupVersionKind` and `SetAPIVersion`/`SetKind` pairs
+- **`raw_gvk_string` (composite literals)** — suppressed for `TypeMeta{}` and `GroupVersionKind{}` when the full GVK can be resolved (both raw and const field values are considered)
+- **`raw_gvk_string` (comparisons)** — **not suppressed** (only one side of the comparison is visible, so a full GVK key cannot be constructed)
+
 ### Suppressing Diagnostics
 
 Use `//nolint:kube-types` to suppress a specific line:
@@ -183,6 +222,9 @@ make tidy
 
 # Build
 make build
+
+# Coverage report
+make cover
 ```
 
 ## Known Limitations
@@ -191,3 +233,5 @@ make build
 - **Cross-function SetAPIVersion/SetKind pairs** are not tracked. Both calls must be on the same receiver variable within the same function body.
 - **Non-const variable format strings** in `fmt.Sprintf` are not analyzed. Only string literals and `const` strings are resolved.
 - The `sprintf_yaml` check uses substring matching for markers. A string like `"log kind: info"` would be flagged if `kind:` is a marker.
+- **IgnoreGVKs does not apply to comparisons** in the `raw_gvk_string` check. Expressions like `obj.GetKind() == "Deployment"` only expose one side of the GVK, making it impossible to construct the full `apiVersion/kind` key needed for suppression.
+- **Positional GVK literals** like `schema.GroupVersionKind{"apps", "v1", "Deployment"}` are not detected. The analyzer requires named key-value pairs (e.g., `Group: "apps"`) to identify fields.

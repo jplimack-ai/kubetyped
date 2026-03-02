@@ -15,7 +15,7 @@ linters-settings:
         include_test_files: false
 
         # Per-check configuration. Omit or leave empty for all checks enabled.
-        # Valid checks: "map_literal", "sprintf_yaml", "unstructured_gvk"
+        # Valid checks: "map_literal", "sprintf_yaml", "unstructured_gvk", "raw_gvk_string"
         checks:
           map_literal:
             enabled: true
@@ -25,6 +25,8 @@ linters-settings:
             additional_markers:
               - "metadata:"
           unstructured_gvk:
+            enabled: true
+          raw_gvk_string:
             enabled: true
 
         # Register additional GVKs beyond the built-in table.

@@ -24,7 +24,7 @@ func checkMapLiteralExpr(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable ma
 			continue
 		}
 
-		key, ok := extractStringValue(kv.Key)
+		key, ok := extractStringOrConstValue(pass, kv.Key)
 		if !ok {
 			continue
 		}

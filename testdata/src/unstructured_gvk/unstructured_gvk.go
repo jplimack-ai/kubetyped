@@ -11,7 +11,7 @@ func knownGVK() {
 	u.SetGroupVersionKind(schema.GroupVersionKind{ // want `SetGroupVersionKind\(apiVersion="apps/v1", kind="Deployment"\) on unstructured.Unstructured: use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) instead`
 		Group:   "apps",
 		Version: "v1",
-		Kind:    "Deployment",
+		Kind:    "Deployment", // want `raw string "Deployment" for GroupVersionKind\.Kind; use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) or define a const`
 	})
 }
 
@@ -20,7 +20,7 @@ func coreGVK() {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{ // want `SetGroupVersionKind\(apiVersion="v1", kind="Pod"\) on unstructured.Unstructured: use \*corev1\.Pod \(import "k8s\.io/api/core/v1"\) instead`
 		Version: "v1",
-		Kind:    "Pod",
+		Kind:    "Pod", // want `raw string "Pod" for GroupVersionKind\.Kind; use \*corev1\.Pod \(import "k8s\.io/api/core/v1"\) or define a const`
 	})
 }
 
@@ -30,7 +30,7 @@ func unknownGVK() {
 	u.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "example.io",
 		Version: "v1",
-		Kind:    "Widget",
+		Kind:    "Widget", // want `raw string "Widget" for GroupVersionKind\.Kind; define a package-level const`
 	})
 }
 
@@ -40,7 +40,7 @@ func variableGVK() {
 	gvk := schema.GroupVersionKind{
 		Group:   "apps",
 		Version: "v1",
-		Kind:    "Deployment",
+		Kind:    "Deployment", // want `raw string "Deployment" for GroupVersionKind\.Kind; use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) or define a const`
 	}
 	u.SetGroupVersionKind(gvk)
 }
@@ -68,5 +68,29 @@ func setKindOnly() {
 func setPairUnknown() {
 	u := &unstructured.Unstructured{}
 	u.SetAPIVersion("example.io/v1")
+	u.SetKind("Widget")
+}
+
+// Value receiver (non-pointer): should still be flagged.
+func valueRecv() {
+	var u unstructured.Unstructured
+	u.SetGroupVersionKind(schema.GroupVersionKind{ // want `SetGroupVersionKind\(apiVersion="apps/v1", kind="Deployment"\) on unstructured.Unstructured: use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) instead`
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "Deployment", // want `raw string "Deployment" for GroupVersionKind\.Kind; use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) or define a const`
+	})
+}
+
+// Reversed pair order: SetKind before SetAPIVersion, diagnostic at min pos.
+func setPairReversed() {
+	u := &unstructured.Unstructured{}
+	u.SetKind("Deployment")      // want `SetAPIVersion\("apps/v1"\) \+ SetKind\("Deployment"\) on unstructured\.Unstructured: use \*appsv1\.Deployment \(import "k8s\.io/api/apps/v1"\) instead`
+	u.SetAPIVersion("apps/v1")
+}
+
+// Dynamic variable as argument: should NOT be flagged (can't resolve at compile time).
+func setPairDynamic(apiVersion string) {
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion(apiVersion)
 	u.SetKind("Widget")
 }

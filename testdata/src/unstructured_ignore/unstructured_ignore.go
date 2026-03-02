@@ -27,6 +27,6 @@ func notIgnored() {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{ // want `SetGroupVersionKind\(apiVersion="v1", kind="Pod"\) on unstructured.Unstructured: use \*corev1\.Pod \(import "k8s\.io/api/core/v1"\) instead`
 		Version: "v1",
-		Kind:    "Pod",
+		Kind:    "Pod", // want `raw string "Pod" for GroupVersionKind\.Kind; use \*corev1\.Pod \(import "k8s\.io/api/core/v1"\) or define a const`
 	})
 }

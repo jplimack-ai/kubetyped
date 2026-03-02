@@ -1,6 +1,7 @@
 package kubetypes
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 
@@ -16,7 +17,7 @@ func init() {
 func New(settings any) (register.LinterPlugin, error) {
 	s, err := register.DecodeSettings[Settings](settings)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding kube-types settings: %w", err)
 	}
 
 	if err := s.validateChecks(); err != nil {
@@ -27,16 +28,18 @@ func New(settings any) (register.LinterPlugin, error) {
 		return nil, err
 	}
 
-	// Build instance-local GVK table (never mutates the global).
-	table := make(map[string]gvkInfo, len(knownGVK)+len(s.ExtraKnownGVKs))
-	maps.Copy(table, knownGVK)
-	for _, entry := range s.ExtraKnownGVKs {
-		key := entry.APIVersion + "/" + entry.Kind
-		info := parseGVKEntry(entry)
-		table[key] = info
-	}
-
+	table := buildGVKTable(s.ExtraKnownGVKs)
 	return &plugin{settings: s, gvkTable: table}, nil
+}
+
+// buildGVKTable creates a GVK lookup table by copying knownGVK and adding extra entries.
+func buildGVKTable(extras []GVKEntry) map[string]gvkInfo {
+	table := make(map[string]gvkInfo, len(knownGVK)+len(extras))
+	maps.Copy(table, knownGVK)
+	for _, entry := range extras {
+		table[gvkKey(entry.APIVersion, entry.Kind)] = parseGVKEntry(entry)
+	}
+	return table
 }
 
 // parseGVKEntry converts a GVKEntry into a gvkInfo by splitting the TypedPackage.

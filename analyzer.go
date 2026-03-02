@@ -35,6 +35,7 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 	nodeFilter := []ast.Node{
 		(*ast.CompositeLit)(nil),
 		(*ast.CallExpr)(nil),
+		(*ast.BinaryExpr)(nil),
 	}
 
 	insp.Preorder(nodeFilter, func(n ast.Node) {
@@ -50,6 +51,9 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 			if enabled[checkMapLiteral] {
 				checkMapLiteralExpr(pass, node, gvkTable, settings)
 			}
+			if enabled[checkRawGVKString] {
+				checkRawGVKStringCompositeLit(pass, node, gvkTable, settings)
+			}
 		case *ast.CallExpr:
 			if enabled[checkSprintfYAML] {
 				checkSprintfYAMLExpr(pass, node, markers)
@@ -57,6 +61,10 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 			if enabled[checkUnstructuredGVK] {
 				checkUnstructuredGVKExpr(pass, node, gvkTable, settings)
 				trackSetAPIVersionKind(pass, node, pairTracker)
+			}
+		case *ast.BinaryExpr:
+			if enabled[checkRawGVKString] {
+				checkRawGVKStringBinaryExpr(pass, node)
 			}
 		}
 	})

@@ -42,9 +42,10 @@ const (
 	checkMapLiteral      = "map_literal"
 	checkSprintfYAML     = "sprintf_yaml"
 	checkUnstructuredGVK = "unstructured_gvk"
+	checkRawGVKString    = "raw_gvk_string"
 )
 
-var allChecks = []string{checkMapLiteral, checkSprintfYAML, checkUnstructuredGVK}
+var allChecks = []string{checkMapLiteral, checkSprintfYAML, checkUnstructuredGVK, checkRawGVKString}
 
 // enabledChecks returns the set of enabled check names based on settings.
 func (s *Settings) enabledChecks() map[string]bool {
@@ -112,5 +113,5 @@ func (s *Settings) markersForSprintfYAML() []string {
 
 // isGVKIgnored returns true if the given apiVersion/kind is in the IgnoreGVKs list.
 func (s *Settings) isGVKIgnored(apiVersion, kind string) bool {
-	return slices.Contains(s.IgnoreGVKs, apiVersion+"/"+kind)
+	return slices.Contains(s.IgnoreGVKs, gvkKey(apiVersion, kind))
 }

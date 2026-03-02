@@ -6,6 +6,9 @@ type gvkInfo struct {
 	ImportPath string // e.g. "k8s.io/api/apps/v1"
 }
 
+// gvkKey returns the lookup key for a GVK: "apiVersion/kind".
+func gvkKey(apiVersion, kind string) string { return apiVersion + "/" + kind }
+
 // knownGVK maps "apiVersion/kind" to the typed Go struct info.
 // This is the default table — never mutated after init.
 var knownGVK = map[string]gvkInfo{
@@ -65,8 +68,7 @@ var knownGVK = map[string]gvkInfo{
 }
 
 // lookupGVK returns the typed struct info for a known apiVersion+kind combination.
-func lookupGVK(table map[string]gvkInfo, apiVersion, kind string) (info gvkInfo, ok bool) {
-	key := apiVersion + "/" + kind
-	info, ok = table[key]
-	return
+func lookupGVK(table map[string]gvkInfo, apiVersion, kind string) (gvkInfo, bool) {
+	info, ok := table[gvkKey(apiVersion, kind)]
+	return info, ok
 }
