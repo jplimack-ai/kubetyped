@@ -28,6 +28,10 @@ func New(settings any) (register.LinterPlugin, error) {
 		return nil, err
 	}
 
+	if err := s.validateGVKKeys(); err != nil {
+		return nil, err
+	}
+
 	table := buildGVKTable(s.ExtraKnownGVKs)
 	return &plugin{settings: s, gvkTable: table}, nil
 }

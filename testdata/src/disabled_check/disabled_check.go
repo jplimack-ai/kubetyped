@@ -2,6 +2,7 @@ package disabled_check
 
 import (
 	"fmt"
+	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,4 +41,15 @@ func setGVK() {
 		Version: "v1",
 		Kind:    "Deployment",
 	})
+}
+
+// deprecated_api trigger: deprecated API version.
+var deprecated = map[string]any{
+	"apiVersion": "apps/v1beta1",
+	"kind":       "Deployment",
+}
+
+// embedded_yaml trigger: os.ReadFile with YAML path.
+func readYAML() {
+	_, _ = os.ReadFile("deployment.yaml")
 }

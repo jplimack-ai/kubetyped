@@ -12,7 +12,7 @@ const mapLiteralURL = "https://github.com/togethercomputer/kube-types#map_litera
 // checkMapLiteralExpr detects map[string]any{} or map[string]interface{}{} composite
 // literals (including named type aliases) that contain both "apiVersion" and "kind"
 // string keys, indicating a hand-constructed Kubernetes manifest.
-func checkMapLiteralExpr(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings) {
+func checkMapLiteralExpr(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool) {
 	if !isMapStringAnyLit(pass, lit) {
 		return
 	}
@@ -41,7 +41,11 @@ func checkMapLiteralExpr(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable ma
 		return
 	}
 
-	if settings.isGVKIgnored(apiVersion, kind) {
+	if evalGVKPolicy(pass, lit.Pos(), apiVersion, kind, checkMapLiteral, settings, enabled) == gvkStop {
+		return
+	}
+
+	if !enabled[checkMapLiteral] {
 		return
 	}
 

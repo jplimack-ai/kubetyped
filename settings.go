@@ -3,6 +3,7 @@ package kubetypes
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Settings holds configuration for the kube-types linter.
@@ -16,6 +17,9 @@ type Settings struct {
 
 	// IgnoreGVKs lists GVK keys ("apiVersion/kind") that should never produce diagnostics.
 	IgnoreGVKs []string `json:"ignore_gvks"`
+
+	// RejectGVKs lists GVK keys ("apiVersion/kind") whose construction should be rejected by policy.
+	RejectGVKs []string `json:"reject_gvks"`
 
 	// Checks configures which checks are enabled and their per-check settings.
 	// nil or empty map means all checks enabled with defaults.
@@ -43,9 +47,11 @@ const (
 	checkSprintfYAML     = "sprintf_yaml"
 	checkUnstructuredGVK = "unstructured_gvk"
 	checkRawGVKString    = "raw_gvk_string"
+	checkDeprecatedAPI   = "deprecated_api"
+	checkEmbeddedYAML    = "embedded_yaml"
 )
 
-var allChecks = []string{checkMapLiteral, checkSprintfYAML, checkUnstructuredGVK, checkRawGVKString}
+var allChecks = []string{checkMapLiteral, checkSprintfYAML, checkUnstructuredGVK, checkRawGVKString, checkDeprecatedAPI, checkEmbeddedYAML}
 
 // enabledChecks returns the set of enabled check names based on settings.
 func (s *Settings) enabledChecks() map[string]bool {
@@ -99,6 +105,22 @@ func (s *Settings) validateExtraGVKs() error {
 	return nil
 }
 
+// validateGVKKeys returns an error if any IgnoreGVKs or RejectGVKs entry
+// is not in "apiVersion/kind" format (must contain exactly one or more '/' separators).
+func (s *Settings) validateGVKKeys() error {
+	for i, key := range s.IgnoreGVKs {
+		if !strings.Contains(key, "/") {
+			return fmt.Errorf("ignore_gvks[%d]: %q must be in \"apiVersion/kind\" format", i, key)
+		}
+	}
+	for i, key := range s.RejectGVKs {
+		if !strings.Contains(key, "/") {
+			return fmt.Errorf("reject_gvks[%d]: %q must be in \"apiVersion/kind\" format", i, key)
+		}
+	}
+	return nil
+}
+
 // markersForSprintfYAML returns the combined list of default + additional markers.
 func (s *Settings) markersForSprintfYAML() []string {
 	cfg, ok := s.Checks[checkSprintfYAML]
@@ -114,4 +136,9 @@ func (s *Settings) markersForSprintfYAML() []string {
 // isGVKIgnored returns true if the given apiVersion/kind is in the IgnoreGVKs list.
 func (s *Settings) isGVKIgnored(apiVersion, kind string) bool {
 	return slices.Contains(s.IgnoreGVKs, gvkKey(apiVersion, kind))
+}
+
+// isGVKRejected returns true if the given apiVersion/kind is in the RejectGVKs list.
+func (s *Settings) isGVKRejected(apiVersion, kind string) bool {
+	return slices.Contains(s.RejectGVKs, gvkKey(apiVersion, kind))
 }

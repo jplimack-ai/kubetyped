@@ -19,7 +19,7 @@ const (
 //	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
 //
 // where u is *unstructured.Unstructured and the GVK matches a known built-in type.
-func checkUnstructuredGVKExpr(pass *analysis.Pass, call *ast.CallExpr, gvkTable map[string]gvkInfo, settings *Settings) {
+func checkUnstructuredGVKExpr(pass *analysis.Pass, call *ast.CallExpr, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool, policyChecked map[token.Pos]gvkAction) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "SetGroupVersionKind" {
 		return
@@ -43,6 +43,41 @@ func checkUnstructuredGVKExpr(pass *analysis.Pass, call *ast.CallExpr, gvkTable 
 		return
 	}
 
+	apiVersion, kind := extractGVKFromCompositeLit(pass, lit)
+	if apiVersion == "" || kind == "" {
+		return
+	}
+
+	action := evalGVKPolicy(pass, call.Pos(), apiVersion, kind, checkUnstructuredGVK, settings, enabled)
+	// Record the policy result so checkRawGVKStringCompositeLit won't emit
+	// duplicate deprecated_api/reject diagnostics for the inner GVK literal.
+	policyChecked[lit.Pos()] = action
+	if action == gvkStop {
+		return
+	}
+
+	if !enabled[checkUnstructuredGVK] {
+		return
+	}
+
+	info, ok := lookupGVK(gvkTable, apiVersion, kind)
+	if !ok {
+		return
+	}
+
+	pass.Report(analysis.Diagnostic{
+		Pos:      call.Pos(),
+		Category: checkUnstructuredGVK,
+		URL:      unstructuredGVKURL,
+		Message: fmt.Sprintf(
+			"SetGroupVersionKind(apiVersion=%q, kind=%q) on unstructured.Unstructured: use *%s (import %q) instead",
+			apiVersion, kind, info.ShortName, info.ImportPath,
+		),
+	})
+}
+
+// extractGVKFromCompositeLit extracts apiVersion and kind from a schema.GroupVersionKind composite literal.
+func extractGVKFromCompositeLit(pass *analysis.Pass, lit *ast.CompositeLit) (string, string) {
 	var group, version, kind string
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
@@ -71,32 +106,14 @@ func checkUnstructuredGVKExpr(pass *analysis.Pass, call *ast.CallExpr, gvkTable 
 	}
 
 	if version == "" || kind == "" {
-		return
+		return "", ""
 	}
 
 	apiVersion := version
 	if group != "" {
 		apiVersion = group + "/" + version
 	}
-
-	if settings.isGVKIgnored(apiVersion, kind) {
-		return
-	}
-
-	info, ok := lookupGVK(gvkTable, apiVersion, kind)
-	if !ok {
-		return
-	}
-
-	pass.Report(analysis.Diagnostic{
-		Pos:      call.Pos(),
-		Category: checkUnstructuredGVK,
-		URL:      unstructuredGVKURL,
-		Message: fmt.Sprintf(
-			"SetGroupVersionKind(apiVersion=%q, kind=%q) on unstructured.Unstructured: use *%s (import %q) instead",
-			apiVersion, kind, info.ShortName, info.ImportPath,
-		),
-	})
+	return apiVersion, kind
 }
 
 // gvkParts tracks SetAPIVersion/SetKind calls on a receiver variable.
@@ -165,13 +182,19 @@ func trackSetAPIVersionKind(pass *analysis.Pass, call *ast.CallExpr, tracker map
 }
 
 // reportSetPairs reports diagnostics for receivers that had both SetAPIVersion and SetKind called.
-func reportSetPairs(pass *analysis.Pass, tracker map[token.Pos]*gvkParts, gvkTable map[string]gvkInfo, settings *Settings) {
+func reportSetPairs(pass *analysis.Pass, tracker map[token.Pos]*gvkParts, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool) {
 	for _, parts := range tracker {
 		if parts.apiVersion == "" || parts.kind == "" {
 			continue
 		}
 
-		if settings.isGVKIgnored(parts.apiVersion, parts.kind) {
+		pos := min(parts.apiVersionPos, parts.kindPos)
+
+		if evalGVKPolicy(pass, pos, parts.apiVersion, parts.kind, checkUnstructuredGVK, settings, enabled) == gvkStop {
+			continue
+		}
+
+		if !enabled[checkUnstructuredGVK] {
 			continue
 		}
 
@@ -179,8 +202,6 @@ func reportSetPairs(pass *analysis.Pass, tracker map[token.Pos]*gvkParts, gvkTab
 		if !ok {
 			continue
 		}
-
-		pos := min(parts.apiVersionPos, parts.kindPos)
 
 		pass.Report(analysis.Diagnostic{
 			Pos:      pos,

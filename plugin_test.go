@@ -18,6 +18,9 @@ func testAnalyzer(t *testing.T, s Settings) *plugin {
 	if err := s.validateExtraGVKs(); err != nil {
 		t.Fatalf("invalid settings: %v", err)
 	}
+	if err := s.validateGVKKeys(); err != nil {
+		t.Fatalf("invalid settings: %v", err)
+	}
 
 	return &plugin{settings: s, gvkTable: buildGVKTable(s.ExtraKnownGVKs)}
 }
@@ -315,7 +318,10 @@ func TestPluginInterface(t *testing.T) {
 		t.Fatalf("New() failed: %v", err)
 	}
 
-	lp, _ := p.(*plugin)
+	lp, ok := p.(*plugin)
+	if !ok {
+		t.Fatal("New() returned unexpected type, want *plugin")
+	}
 	if mode := lp.GetLoadMode(); mode != "typesinfo" {
 		t.Fatalf("GetLoadMode() = %q, want %q", mode, "typesinfo")
 	}
@@ -371,9 +377,11 @@ func TestAllChecksDisabled(t *testing.T) {
 			checkSprintfYAML:     {Enabled: &disabled},
 			checkUnstructuredGVK: {Enabled: &disabled},
 			checkRawGVKString:    {Enabled: &disabled},
+			checkDeprecatedAPI:   {Enabled: &disabled},
+			checkEmbeddedYAML:    {Enabled: &disabled},
 		},
 	})
-	// All checks disabled — disabled_check triggers all 4, expects zero diagnostics.
+	// All checks disabled — disabled_check triggers all 6, expects zero diagnostics.
 	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "disabled_check")
 }
 
@@ -640,5 +648,175 @@ func TestNewWithInvalidExtraGVK(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected New() to fail for empty api_version, got nil")
+	}
+}
+
+func TestDeprecatedAPI(t *testing.T) {
+	p := testAnalyzer(t, Settings{IncludeTestFiles: true})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "deprecated_api")
+}
+
+func TestCheckDisabled_DeprecatedAPI(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkDeprecatedAPI: {Enabled: &disabled},
+		},
+	})
+	// only_deprecated_api triggers ONLY deprecated_api. Disabling it → zero diagnostics.
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "only_deprecated_api")
+}
+
+func TestRejectGVKs(t *testing.T) {
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		RejectGVKs:       []string{"v1/Pod"},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "reject_gvks")
+}
+
+func TestRejectWinsOverIgnore(t *testing.T) {
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		RejectGVKs:       []string{"v1/Pod"},
+		IgnoreGVKs:       []string{"v1/Pod"},
+	})
+	// v1/Pod is in both lists — reject wins, producing a diagnostic instead of suppression.
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "reject_wins_over_ignore")
+}
+
+func TestEmbeddedYAML(t *testing.T) {
+	p := testAnalyzer(t, Settings{IncludeTestFiles: true})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "embedded_yaml")
+}
+
+func TestCheckDisabled_EmbeddedYAML(t *testing.T) {
+	disabled := false
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		Checks: map[string]CheckConfig{
+			checkEmbeddedYAML: {Enabled: &disabled},
+		},
+	})
+	// only_embedded_yaml triggers ONLY embedded_yaml. Disabling it → zero diagnostics.
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "only_embedded_yaml")
+}
+
+func TestIsGVKRejected(t *testing.T) {
+	s := Settings{
+		RejectGVKs: []string{"apps/v1/Deployment", "v1/Pod"},
+	}
+
+	if !s.isGVKRejected("apps/v1", "Deployment") {
+		t.Fatal("expected apps/v1 Deployment to be rejected")
+	}
+	if !s.isGVKRejected("v1", "Pod") {
+		t.Fatal("expected v1 Pod to be rejected")
+	}
+	if s.isGVKRejected("v1", "Service") {
+		t.Fatal("expected v1 Service to NOT be rejected")
+	}
+}
+
+func TestIsYAMLPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"deployment.yaml", true},
+		{"config.yml", true},
+		{"data.json", false},
+		{"main.go", false},
+		{"templates/service.yaml", true},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isYAMLPath(tt.path); got != tt.want {
+			t.Errorf("isYAMLPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestValidateGVKKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		s       Settings
+		wantErr bool
+	}{
+		{
+			name:    "valid keys",
+			s:       Settings{IgnoreGVKs: []string{"apps/v1/Deployment", "v1/Pod"}, RejectGVKs: []string{"v1/Secret"}},
+			wantErr: false,
+		},
+		{
+			name:    "empty lists are valid",
+			s:       Settings{},
+			wantErr: false,
+		},
+		{
+			name:    "ignore_gvks missing slash",
+			s:       Settings{IgnoreGVKs: []string{"Deployment"}},
+			wantErr: true,
+		},
+		{
+			name:    "reject_gvks missing slash",
+			s:       Settings{RejectGVKs: []string{"Pod"}},
+			wantErr: true,
+		},
+		{
+			name:    "ignore_gvks empty string",
+			s:       Settings{IgnoreGVKs: []string{""}},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.s.validateGVKKeys()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateGVKKeys() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNewWithInvalidGVKKey(t *testing.T) {
+	_, err := New(map[string]any{
+		"ignore_gvks": []any{"Deployment"},
+	})
+	if err == nil {
+		t.Fatal("expected New() to fail for invalid GVK key format, got nil")
+	}
+}
+
+func TestDeprecatedAPIIgnored(t *testing.T) {
+	p := testAnalyzer(t, Settings{
+		IncludeTestFiles: true,
+		IgnoreGVKs:       []string{"apps/v1beta1/Deployment"},
+	})
+	analysistest.Run(t, analysistest.TestData(), newAnalyzer(p), "deprecated_api_ignore")
+}
+
+func TestLookupDeprecatedGVK(t *testing.T) {
+	tests := []struct {
+		apiVersion string
+		kind       string
+		wantOK     bool
+		wantRemIn  string
+	}{
+		{"apps/v1beta1", "Deployment", true, "1.16"},
+		{"extensions/v1beta1", "Ingress", true, "1.22"},
+		{"policy/v1beta1", "PodSecurityPolicy", true, "1.25"},
+		{"apps/v1", "Deployment", false, ""},
+		{"v1", "Pod", false, ""},
+	}
+	for _, tt := range tests {
+		info, ok := lookupDeprecatedGVK(tt.apiVersion, tt.kind)
+		if ok != tt.wantOK {
+			t.Errorf("lookupDeprecatedGVK(%q, %q) ok = %v, want %v", tt.apiVersion, tt.kind, ok, tt.wantOK)
+		}
+		if ok && info.RemovedIn != tt.wantRemIn {
+			t.Errorf("lookupDeprecatedGVK(%q, %q) RemovedIn = %q, want %q", tt.apiVersion, tt.kind, info.RemovedIn, tt.wantRemIn)
+		}
 	}
 }

@@ -23,7 +23,7 @@ func checkSprintfYAMLExpr(pass *analysis.Pass, call *ast.CallExpr, markers []str
 	}
 
 	pkgIdent, ok := sel.X.(*ast.Ident)
-	if !ok || pkgIdent.Name != "fmt" {
+	if !ok || !isPkgPath(pass, pkgIdent, "fmt") {
 		return
 	}
 

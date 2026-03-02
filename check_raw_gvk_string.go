@@ -17,7 +17,7 @@ const (
 )
 
 // checkRawGVKStringCompositeLit flags raw string literals in TypeMeta and GroupVersionKind composite literals.
-func checkRawGVKStringCompositeLit(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings) {
+func checkRawGVKStringCompositeLit(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool, policyChecked map[token.Pos]gvkAction) {
 	if pass.TypesInfo == nil {
 		return
 	}
@@ -42,15 +42,15 @@ func checkRawGVKStringCompositeLit(pass *analysis.Pass, lit *ast.CompositeLit, g
 
 	switch {
 	case pkgPath == typeMetaPkgPath && typeName == "TypeMeta":
-		checkTypeMetaRawStrings(pass, lit, settings)
+		checkTypeMetaRawStrings(pass, lit, settings, enabled, policyChecked)
 	case pkgPath == schemaPkgPath && typeName == "GroupVersionKind":
-		checkGVKRawStrings(pass, lit, gvkTable, settings)
+		checkGVKRawStrings(pass, lit, gvkTable, settings, enabled, policyChecked)
 	}
 }
 
 // checkTypeMetaRawStrings flags raw string literals in TypeMeta.Kind and TypeMeta.APIVersion.
 // Both field values (raw or const) are extracted first so IgnoreGVKs can suppress the full GVK.
-func checkTypeMetaRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, settings *Settings) {
+func checkTypeMetaRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, settings *Settings, enabled map[string]bool, policyChecked map[token.Pos]gvkAction) {
 	type rawField struct {
 		name string
 		val  string
@@ -89,11 +89,19 @@ func checkTypeMetaRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, setting
 		}
 	}
 
-	if len(raws) == 0 {
-		return
+	if apiVersion != "" && kind != "" {
+		if action, checked := policyChecked[lit.Pos()]; checked {
+			// checkUnstructuredGVKExpr already ran the policy for this literal.
+			// If it returned gvkStop (reject or ignore), suppress raw diagnostics too.
+			if action == gvkStop {
+				return
+			}
+		} else if evalGVKPolicy(pass, lit.Pos(), apiVersion, kind, checkRawGVKString, settings, enabled) == gvkStop {
+			return
+		}
 	}
 
-	if apiVersion != "" && kind != "" && settings.isGVKIgnored(apiVersion, kind) {
+	if len(raws) == 0 || !enabled[checkRawGVKString] {
 		return
 	}
 
@@ -111,7 +119,7 @@ func checkTypeMetaRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, setting
 }
 
 // checkGVKRawStrings flags raw string literals in GroupVersionKind.Kind and looks up the GVK table for suggestions.
-func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings) {
+func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map[string]gvkInfo, settings *Settings, enabled map[string]bool, policyChecked map[token.Pos]gvkAction) {
 	var group, version, kind string
 	var kindValue ast.Expr
 	var kindIsRaw bool
@@ -137,12 +145,10 @@ func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map
 				kind = val
 				kindValue = kv.Value
 				kindIsRaw = true
+			} else if val, ok := extractStringOrConstValue(pass, kv.Value); ok {
+				kind = val
 			}
 		}
-	}
-
-	if !kindIsRaw || kind == "" {
-		return
 	}
 
 	apiVersion := version
@@ -150,7 +156,17 @@ func checkGVKRawStrings(pass *analysis.Pass, lit *ast.CompositeLit, gvkTable map
 		apiVersion = group + "/" + version
 	}
 
-	if settings.isGVKIgnored(apiVersion, kind) {
+	if apiVersion != "" && kind != "" {
+		if action, checked := policyChecked[lit.Pos()]; checked {
+			if action == gvkStop {
+				return
+			}
+		} else if evalGVKPolicy(pass, lit.Pos(), apiVersion, kind, checkRawGVKString, settings, enabled) == gvkStop {
+			return
+		}
+	}
+
+	if !kindIsRaw || kind == "" || !enabled[checkRawGVKString] {
 		return
 	}
 

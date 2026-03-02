@@ -29,8 +29,19 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 	markers := settings.markersForSprintfYAML()
 	insp, _ := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
+	// Scan for //go:embed YAML directives before the AST walk.
+	if enabled[checkEmbeddedYAML] {
+		checkEmbeddedYAMLFiles(pass, settings)
+	}
+
 	// Track SetAPIVersion/SetKind pairs per receiver for the unstructured check.
 	pairTracker := make(map[token.Pos]*gvkParts)
+
+	// Track composite literal positions already policy-checked by checkUnstructuredGVKExpr
+	// to avoid duplicate deprecated_api/reject diagnostics from checkRawGVKStringCompositeLit.
+	// The value stores the gvkAction returned by evalGVKPolicy so the raw_gvk_string checker
+	// can also skip its own diagnostic when the policy said gvkStop.
+	policyChecked := make(map[token.Pos]gvkAction)
 
 	nodeFilter := []ast.Node{
 		(*ast.CompositeLit)(nil),
@@ -48,19 +59,22 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 
 		switch node := n.(type) {
 		case *ast.CompositeLit:
-			if enabled[checkMapLiteral] {
-				checkMapLiteralExpr(pass, node, gvkTable, settings)
+			if enabled[checkMapLiteral] || enabled[checkDeprecatedAPI] {
+				checkMapLiteralExpr(pass, node, gvkTable, settings, enabled)
 			}
-			if enabled[checkRawGVKString] {
-				checkRawGVKStringCompositeLit(pass, node, gvkTable, settings)
+			if enabled[checkRawGVKString] || enabled[checkDeprecatedAPI] {
+				checkRawGVKStringCompositeLit(pass, node, gvkTable, settings, enabled, policyChecked)
 			}
 		case *ast.CallExpr:
 			if enabled[checkSprintfYAML] {
 				checkSprintfYAMLExpr(pass, node, markers)
 			}
-			if enabled[checkUnstructuredGVK] {
-				checkUnstructuredGVKExpr(pass, node, gvkTable, settings)
+			if enabled[checkUnstructuredGVK] || enabled[checkDeprecatedAPI] {
+				checkUnstructuredGVKExpr(pass, node, gvkTable, settings, enabled, policyChecked)
 				trackSetAPIVersionKind(pass, node, pairTracker)
+			}
+			if enabled[checkEmbeddedYAML] {
+				checkReadFileYAML(pass, node)
 			}
 		case *ast.BinaryExpr:
 			if enabled[checkRawGVKString] {
@@ -70,8 +84,8 @@ func run(pass *analysis.Pass, settings *Settings, gvkTable map[string]gvkInfo) (
 	})
 
 	// Report SetAPIVersion/SetKind pairs with known GVKs.
-	if enabled[checkUnstructuredGVK] {
-		reportSetPairs(pass, pairTracker, gvkTable, settings)
+	if enabled[checkUnstructuredGVK] || enabled[checkDeprecatedAPI] {
+		reportSetPairs(pass, pairTracker, gvkTable, settings, enabled)
 	}
 
 	return nil, nil
@@ -120,6 +134,22 @@ func extractStringOrConstValue(pass *analysis.Pass, expr ast.Expr) (string, bool
 	}
 
 	return constant.StringVal(c.Val()), true
+}
+
+// isPkgPath returns true if ident resolves to an imported package with the given path.
+func isPkgPath(pass *analysis.Pass, ident *ast.Ident, path string) bool {
+	if pass.TypesInfo == nil {
+		return false
+	}
+	obj := pass.TypesInfo.Uses[ident]
+	if obj == nil {
+		return false
+	}
+	pkgName, ok := obj.(*types.PkgName)
+	if !ok {
+		return false
+	}
+	return pkgName.Imported().Path() == path
 }
 
 // isMapStringAnyLit checks whether a composite literal represents a map[string]any
